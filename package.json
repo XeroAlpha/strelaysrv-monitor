@@ -10,6 +10,7 @@
   "license": "GPL-3.0",
   "description": "",
   "dependencies": {
+    "@stroncium/procfs": "^1.2.1",
     "got": "^12.6.0",
     "ipaddr.js": "^2.0.1",
     "mysql2": "^3.3.2",
