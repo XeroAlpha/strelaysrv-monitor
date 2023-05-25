@@ -1,3 +1,4 @@
+import { inspect } from 'util';
 import { got } from 'got';
 import { createConnection } from 'mysql2/promise';
 import whyIsNodeRunning from 'why-is-node-running';
@@ -33,13 +34,15 @@ async function main() {
         num_proxies int NOT NULL,
         uptime_seconds int NOT NULL,
         establish_time int NOT NULL,
-        handshake_time int NOT NULL
+        handshake_time int NOT NULL,
+        last_error text NOT NULL
     )`);
     const status = await got(`${config.relayStatusUrl}/status`).json();
     let proxyStatus = { establishTime: -1, handshakeTime: -1 };
     try {
         proxyStatus = await testProxy(config.relay);
     } catch(err) {
+        proxyStatus.lastError = err;
         console.error(err);
     }
     insertTable(conn, 'events', {
@@ -56,10 +59,14 @@ async function main() {
         num_proxies: status.numProxies,
         uptime_seconds: status.uptimeSeconds,
         establish_time: proxyStatus.establishTime,
-        handshake_time: proxyStatus.handshakeTime
-    })
+        handshake_time: proxyStatus.handshakeTime,
+        last_error: proxyStatus.lastError ? inspect(proxyStatus.lastError) : ''
+    });
     await conn.end();
-    process.exit(0);
+    const deferTimeout = setTimeout(() => {
+        process.exit(1);
+    }, 5000);
+    deferTimeout.unref();
 }
 
 main().catch((err) => {
