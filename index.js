@@ -36,7 +36,7 @@ async function main() {
         handshake_time int NOT NULL
     )`);
     const status = await got(`${config.relayStatusUrl}/status`).json();
-    let proxyStatus = { establishTime: 0, handshakeTime: 0 };
+    let proxyStatus = { establishTime: -1, handshakeTime: -1 };
     try {
         proxyStatus = await testProxy(config.relay);
     } catch(err) {
@@ -59,7 +59,7 @@ async function main() {
         handshake_time: proxyStatus.handshakeTime
     })
     await conn.end();
-    // process.exit(0);
+    process.exit(0);
 }
 
 main().catch((err) => {

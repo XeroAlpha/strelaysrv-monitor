@@ -99,6 +99,7 @@ function writeXDRByteArray(buffer) {
     return bufWithPadding;
 }
 
+const HEADER_MAGIC = 0x9e79bc40;
 /**
  * @param {Socket} socket
  */
@@ -107,7 +108,7 @@ async function readHeader(socket) {
     const magic = buf.readUInt32BE(0);
     const messageType = buf.readUInt32BE(4);
     const messageLength = buf.readUInt32BE(8);
-    if (magic !== 0x9e79bc40) {
+    if (magic !== HEADER_MAGIC) {
         throw new Error('magic mismatch');
     }
     return { messageType, messageLength };
@@ -115,7 +116,7 @@ async function readHeader(socket) {
 
 function writeHeader(messageType, messageLength) {
     const buf = Buffer.alloc(12);
-    buf.writeUInt32BE(0x9e79bc40, 0);
+    buf.writeUInt32BE(HEADER_MAGIC, 0);
     buf.writeUInt32BE(messageType, 4);
     buf.writeUInt32BE(messageLength, 8);
     return buf;
@@ -182,7 +183,7 @@ const messageTypeReaders = [
             key,
             address,
             port: port & 0xffff,
-            serverSocket: serverSocket & (0x1 === 0x1)
+            serverSocket: (serverSocket & 0x1) === 0x1
         };
     },
     (buffer) => ({ type: 'relayFull' })
@@ -449,11 +450,13 @@ async function testConnection(sentSocket, receivedSocket, size) {
     sentSocket.write(sentBytes);
     const timeoutError = new Error(`Timeout`);
     let timeout;
+    const timeoutPromise = new Promise(
+        (_, reject) =>
+            (timeout = setTimeout(() => reject(timeoutError), 60 * 1000))
+    );
     const receivedBytes = await Promise.race([
         receivedBytesPromise,
-        new Promise((_, reject) =>
-            timeout = setTimeout(() => reject(timeoutError), 60 * 1000)
-        )
+        timeoutPromise
     ]).finally(() => {
         clearTimeout(timeout);
     });
@@ -471,30 +474,44 @@ export async function testProxy({
     clientCert,
     clientKey
 }) {
-    const establishStart = process.hrtime.bigint();
-    const serverClient = new RelayClient(serverCert, serverKey);
-    const clientClient = new RelayClient(clientCert, clientKey);
-    console.log('Starting to connect to relay');
-    await serverClient.joinRelay(host, port, token);
-    console.log('Server connected to relay successfully');
-    serverClient.listen();
-    const serverConnPromise = serverClient.waitForConnection();
-    await clientClient.joinRelay(host, port, token);
-    console.log('Client connected to relay successfully');
-    const clientConn = await clientClient.connect(serverClient.deviceId);
-    console.log('Client starts to proxy');
-    const serverConn = await serverConnPromise;
-    console.log('Server starts to proxy');
-    const establishTime = Number((process.hrtime.bigint() - establishStart) / 1000000n);
-    const handshakeStart = process.hrtime.bigint();
-    await testConnection(serverConn, clientConn, 128);
-    console.log('Proxy from server to client successfully');
-    await testConnection(clientConn, serverConn, 128);
-    console.log('Proxy from client to server successfully');
-    const handshakeTime = Number((process.hrtime.bigint() - handshakeStart) / 1000000n);
-    serverConn.end();
-    clientConn.end();
-    serverClient.close();
-    clientClient.close();
-    return { establishTime, handshakeTime };
+    let serverClient, clientClient, serverConn, clientConn;
+    let lastError = null;
+    let establishTime = 0;
+    let handshakeTime = 0;
+    try {
+        const establishStart = process.hrtime.bigint();
+        serverClient = new RelayClient(serverCert, serverKey);
+        clientClient = new RelayClient(clientCert, clientKey);
+        console.log('Starting to connect to relay');
+        await serverClient.joinRelay(host, port, token);
+        console.log('Server connected to relay successfully');
+        serverClient.listen();
+        const serverConnPromise = serverClient.waitForConnection();
+        await clientClient.joinRelay(host, port, token);
+        console.log('Client connected to relay successfully');
+        clientConn = await clientClient.connect(serverClient.deviceId);
+        console.log('Client starts to proxy');
+        serverConn = await serverConnPromise;
+        console.log('Server starts to proxy');
+        establishTime = Number(
+            (process.hrtime.bigint() - establishStart) / 1000000n
+        );
+        const handshakeStart = process.hrtime.bigint();
+        await testConnection(serverConn, clientConn, 128);
+        console.log('Proxy from server to client successfully');
+        await testConnection(clientConn, serverConn, 128);
+        console.log('Proxy from client to server successfully');
+        handshakeTime = Number(
+            (process.hrtime.bigint() - handshakeStart) / 1000000n
+        );
+    } catch (err) {
+        lastError = err;
+    }
+    try {
+        if (serverConn) serverConn.end();
+        if (clientConn) clientConn.end();
+        if (serverClient) serverClient.close();
+        if (clientClient) clientClient.close();
+    } catch (_) {}
+    return { establishTime, handshakeTime, lastError };
 }
