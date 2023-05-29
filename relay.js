@@ -171,7 +171,7 @@ const messageTypeReaders = [
         let address = socket.remoteAddress;
         if (addressBytes.length > 0) {
             const addressStr = ipaddr
-                .fromByteArray(Uint8Array.from(address))
+                .fromByteArray(Uint8Array.from(addressBytes))
                 .toString();
             if (addressStr !== '0.0.0.0' && addressStr !== '::') {
                 address = addressStr;
